@@ -1,0 +1,16 @@
+﻿[Unit]
+Description=Clash subscription converter WebUI
+After=network.target mihomo-conv.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/clash-converter-10000
+EnvironmentFile=/opt/clash-converter-10000/.env
+ExecStart=/opt/clash-converter-10000/.venv/bin/gunicorn -w 1 --threads 8 -b 0.0.0.0:8090 app:app
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

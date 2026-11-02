@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clash2pureIP</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="mark">C</div><div><h1>clash2pureIP</h1>
+    <p class="sub">订阅链接 → 本地代理端口 → 导入代理池</p></div></div>
+  <div class="spacer"></div>
+  <span class="user">{{ user or "guest" }}</span>
+  <a class="logout" href="/logout">退出</a>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>1. 转换订阅</h2>
+    <div class="row">
+      <label class="field-inline grow">订阅链接
+        <input id="url" type="text" placeholder="https://.../api/v1/...?token=...">
+      </label>
+      <button id="advanced-toggle" class="subtle" type="button"
+              aria-expanded="false" aria-controls="advanced-settings">高级设置</button>
+      <button id="convert" class="primary">转换并生成端口</button>
+    </div>
+    <div id="advanced-settings" class="advanced-settings hidden">
+      <div class="settings-grid">
+        <label class="field-inline">起始端口
+          <input id="port-start" type="number" placeholder="10000" min="10000" max="10999">
+        </label>
+        <label class="field-inline">代理账号
+          <input id="proxy-user" type="text" autocomplete="off" placeholder="沿用服务端账号">
+        </label>
+        <label class="field-inline">代理密码
+          <input id="proxy-pass" type="password" autocomplete="new-password" placeholder="沿用服务端密码">
+        </label>
+      </div>
+      <p class="hint settings-note">留空即使用服务端默认值；自定义账号和密码需要同时填写。</p>
+    </div>
+    <p class="hint" id="convert-hint">代理出口固定使用 10000–10999 端口；起始端口之后必须容纳全部节点。</p>
+  </section>
+
+  <section class="panel hidden" id="result-panel">
+    <h2>2. 转换结果</h2>
+    <div class="row" style="margin-bottom:12px">
+      <span class="hint" id="summary"></span>
+      <div class="spacer" style="flex:1"></div>
+      <label class="field-inline">输出格式
+        <select id="format">
+          <option value="http-url">http://username:password@hostname:port</option>
+          <option value="socks5-url">socks5://username:password@hostname:port</option>
+          <option value="socks5h-url">socks5h://username:password@hostname:port</option>
+          <option value="host:port:user:pass">hostname:port:username:password</option>
+          <option value="user:pass:host:port">username:password:hostname:port</option>
+          <option value="user:pass@host:port">username:password@hostname:port</option>
+          <option value="host:port@user:pass">hostname:port@username:password</option>
+        </select>
+      </label>
+      <button id="test-all">全部测速</button>
+      <button id="copy-format" class="primary">复制当前格式</button>
+      <button id="copy-all">复制全部格式</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>端口</th><th>节点</th><th>输出</th><th>测速</th><th>复制</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="hint" id="test-hint">出口同时兼容 HTTP 与 SOCKS5；测速协议跟随当前输出格式。</p>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let entries = [];
+let formatList = [];
+let currentFormat = "http-url";
+let proxyUser = "";
+const testResults = new Map();
+
+function valueOf(entry) {
+  if (entry.formats && entry.formats[currentFormat]) return entry.formats[currentFormat];
+  if (entry.formats && entry.formats.url) return entry.formats.url;
+  return entry.url;
+}
+
+function testScheme() {
+  if (currentFormat === "socks5h-url") return "socks5h";
+  if (currentFormat === "socks5-url") return "socks5";
+  return "http";
+}
+
+function toast(message, isError) {
+  const node = $("#toast");
+  node.textContent = message;
+  node.classList.toggle("error", !!isError);
+  node.classList.remove("hidden");
+  clearTimeout(node._t);
+  node._t = setTimeout(() => node.classList.add("hidden"), 3500);
+}
+
+async function api(path, options) {
+  const res = await fetch(path, {headers: {"Content-Type": "application/json"}, ...(options || {})});
+  const data = await res.json().catch(() => ({ok: false, error: `HTTP ${res.status}`}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function render(data) {
+  entries = data.entries || [];
+  if (data.formats) formatList = data.formats;
+  if (data.proxy_user) proxyUser = data.proxy_user;
+  if (!entries.length) return;
+  $("#result-panel").classList.remove("hidden");
+  $("#summary").textContent =
+    `${entries.length} 个节点 · 端口 ${data.port_start ?? entries[0].port} 起 · ` +
+    `账号 ${proxyUser || "-"} · ${data.converted_at || ""}` +
+    (data.ready === false ? " · mihomo 未就绪" : " · mihomo 就绪");
+  renderRows();
+}
+
+function testLabel(port) {
+  const value = testResults.get(port);
+  if (!value) return "未测";
+  if (value.status !== "ok") return "失败";
+  return `${value.delay_ms} ms`;
+}
+
+function renderRows() {
+  $("#rows").innerHTML = entries.map((e, i) =>
+    `<tr><td>${i + 1}</td><td class="mono">${e.port}</td>` +
+    `<td>${escapeHtml(e.name)}</td><td class="mono">${escapeHtml(valueOf(e))}</td>` +
+    `<td class="test-result" data-test-port="${e.port}">${testLabel(e.port)}</td>` +
+    `<td><button class="row-copy" data-copy-port="${e.port}">复制</button></td></tr>`).join("");
+}
+
+function testOne(port, scheme) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  const started = performance.now();
+  return fetch(`/api/test?port=${encodeURIComponent(port)}&scheme=${encodeURIComponent(scheme)}`, {
+    headers: {"Accept": "application/json"}, signal: controller.signal,
+  }).then(async (res) => {
+    const data = await res.json().catch(() => ({ok: false, error: `HTTP ${res.status}`}));
+    if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+    return {status: "ok", delay_ms: data.delay_ms};
+  }).catch((err) => ({
+    status: "fail",
+    delay_ms: Math.round(performance.now() - started),
+    error: err.name === "AbortError" ? "timeout" : err.message,
+  })).finally(() => clearTimeout(timer));
+}
+
+async function runTests(ports, scheme) {
+  const button = $("#test-all");
+  button.disabled = true;
+  const queue = [...ports];
+  let done = 0;
+  const worker = async () => {
+    while (queue.length) {
+      const port = queue.shift();
+      testResults.set(port, {status: "running"});
+      const cell = document.querySelector(`[data-test-port="${port}"]`);
+      if (cell) cell.textContent = "测试中…";
+      const result = await testOne(port, scheme);
+      testResults.set(port, result);
+      if (cell) {
+        cell.textContent = testLabel(port);
+        cell.classList.toggle("test-failed", result.status !== "ok");
+      }
+      done += 1;
+      $("#test-hint").textContent = `${scheme.toUpperCase()} 测速进度 ${done}/${ports.length}`;
+    }
+  };
+  await Promise.all(Array.from({length: Math.min(8, ports.length)}, worker));
+  const ok = [...testResults.values()].filter((r) => r.status === "ok").length;
+  $("#test-hint").textContent = `${scheme.toUpperCase()} 测速完成：成功 ${ok}，失败 ${ports.length - ok}`;
+  button.disabled = false;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function copy(text, label) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const a = document.createElement("textarea"); a.value = text; document.body.appendChild(a);
+    a.select(); document.execCommand("copy"); a.remove();
+  }
+  toast(`${label} 已复制（${text.split("\n").length} 行）`);
+}
+
+$("#advanced-toggle").addEventListener("click", () => {
+  const expanded = $("#advanced-toggle").getAttribute("aria-expanded") === "true";
+  $("#advanced-toggle").setAttribute("aria-expanded", String(!expanded));
+  $("#advanced-settings").classList.toggle("hidden", expanded);
+});
+
+$("#convert").addEventListener("click", async () => {
+  const url = $("#url").value.trim();
+  if (!url) return toast("先填订阅链接", true);
+  const payload = {url};
+  const advancedEnabled = $("#advanced-toggle").getAttribute("aria-expanded") === "true";
+  if (advancedEnabled) {
+    const portStart = $("#port-start").value.trim();
+    const proxyUser = $("#proxy-user").value.trim();
+    const proxyPass = $("#proxy-pass").value;
+    if (portStart) {
+      const parsedPort = Number(portStart);
+      if (!Number.isInteger(parsedPort)) return toast("起始端口必须是整数", true);
+      payload.port_start = parsedPort;
+    }
+    if (!!proxyUser !== !!proxyPass) {
+      return toast("代理账号和密码需要同时填写", true);
+    }
+    if (proxyUser && proxyPass) {
+      payload.proxy_user = proxyUser;
+      payload.proxy_password = proxyPass;
+    }
+  }
+
+  const button = $("#convert");
+  button.disabled = true;
+  $("#convert-hint").textContent = "转换中…";
+  try {
+    const data = await api("/api/convert", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    render(data);
+    $("#convert-hint").textContent = `完成：${data.nodes} 个节点，端口 ${data.port_start} 起`;
+    toast(`转换完成：${data.nodes} 个节点`);
+  } catch (err) {
+    $("#convert-hint").textContent = "";
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#format").addEventListener("change", (event) => {
+  currentFormat = event.target.value;
+  testResults.clear();
+  if (entries.length) renderRows();
+});
+
+$("#test-all").addEventListener("click", () => {
+  if (!entries.length) return toast("先转换", true);
+  testResults.clear();
+  renderRows();
+  runTests(entries.map((entry) => entry.port), testScheme());
+});
+
+$("#rows").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-copy-port]");
+  if (!button) return;
+  const entry = entries.find((item) => item.port === Number(button.dataset.copyPort));
+  if (entry) copy(valueOf(entry), `端口 ${entry.port}`);
+});
+
+$("#copy-format").addEventListener("click", () =>
+  copy(entries.map((e) => valueOf(e)).join("\n"), currentFormat));
+
+$("#copy-all").addEventListener("click", () => {
+  const blocks = formatList.length
+    ? formatList.map((f) => `# ${f.label}\n` + entries.map((e) => e.formats[f.key]).join("\n"))
+    : [entries.map((e) => valueOf(e)).join("\n")];
+  copy(blocks.join("\n\n"), "全部格式");
+});
+
+(async function bootstrap() {
+  try {
+    const data = await api("/api/status");
+    if (data.entries && data.entries.length) render(data);
+  } catch (e) { /* ignore */ }
+})();
+</script>
+</body>
+</html>

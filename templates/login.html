@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · clash2pureIP</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="auth">
+  <section class="card">
+    <div class="brand">
+      <div class="mark">C</div>
+      <div>
+        <h1>clash2pureIP</h1>
+        <p class="sub">订阅链接 → 可导入的代理列表</p>
+      </div>
+    </div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <label class="field"><span>账号</span>
+        <input name="username" value="{{ username or '' }}" autocomplete="username" autofocus required>
+      </label>
+      <label class="field"><span>密码</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button class="primary" type="submit" style="width:100%;margin-top:18px">进入</button>
+    </form>
+    <p class="foot">仅限授权使用</p>
+  </section>
+</main>
+</body>
+</html>
