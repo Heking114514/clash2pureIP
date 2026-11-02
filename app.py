@@ -263,8 +263,10 @@ def api_test():
             elif greeting[1] != 0:
                 raise RuntimeError(f"SOCKS5 返回未知认证方式: {greeting[1]}")
             target = target_host.encode()
-            request = b"\x05\x01\x00\x03" + bytes((len(target),)) + target + (443).to_bytes(2, "big")
-            sock.sendall(request)
+            socks_request = (
+                b"\x05\x01\x00\x03" + bytes((len(target),)) + target
+                + (443).to_bytes(2, "big"))
+            sock.sendall(socks_request)
             reply = recv_exact(sock, 4)
             if reply[:2] != b"\x05\x00":
                 raise RuntimeError(f"SOCKS5 CONNECT 失败: {reply.hex()}")
