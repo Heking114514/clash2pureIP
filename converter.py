@@ -6,11 +6,13 @@ import re
 import socket
 import subprocess
 import time
-from urllib.parse import quote
 
 import yaml
 
-BAD_NAME = re.compile(r"剩余流量|套餐到期|过期|官网|订阅|traffic|expire", re.I)
+BAD_NAME = re.compile(
+    r"剩余流量|套餐到期|过期|官网|订阅|traffic|expire|通知|邀请|返利|流量重置|"
+    r"更新于|一元|yiyuan|重置|群|频道|telegram|tg群|电报", re.I)
+BAD_SERVER = re.compile(r"^(127\.|0\.0\.0\.0$|localhost$)", re.I)
 LISTEN_HOST = "127.0.0.1"
 
 
@@ -31,6 +33,7 @@ def parse_subscription(text: str) -> list[dict]:
         and item.get("name")
         and item.get("type")
         and not BAD_NAME.search(str(item["name"]))
+        and not BAD_SERVER.search(str(item.get("server", "")))
     ]
     if not proxies:
         raise ConvertError("订阅里没有可用节点（或全是流量/到期提示）")
@@ -50,9 +53,6 @@ def parse_subscription(text: str) -> list[dict]:
 
 
 EXPORT_FORMATS = [
-    ("http-url", "http://username:password@hostname:port"),
-    ("socks5-url", "socks5://username:password@hostname:port"),
-    ("socks5h-url", "socks5h://username:password@hostname:port"),
     ("host:port:user:pass", "hostname:port:username:password"),
     ("user:pass:host:port", "username:password:hostname:port"),
     ("user:pass@host:port", "username:password@hostname:port"),
@@ -62,16 +62,10 @@ EXPORT_FORMATS = [
 
 def _formats(host: str, port: int, user: str, password: str) -> dict:
     endpoint = f"{host}:{port}"
-    if user and password:
-        credentials = f"{quote(user, safe='')}:{quote(password, safe='')}@"
-    else:
-        credentials = ""
-    http_url = f"http://{credentials}{endpoint}"
+    if not (user and password):
+        return {"url": f"http://{endpoint}", "host:port": endpoint}
     return {
-        "url": http_url,
-        "http-url": http_url,
-        "socks5-url": f"socks5://{credentials}{endpoint}",
-        "socks5h-url": f"socks5h://{credentials}{endpoint}",
+        "url": f"http://{user}:{password}@{endpoint}",
         "host:port": endpoint,
         "host:port:user:pass": f"{endpoint}:{user}:{password}",
         "user:pass:host:port": f"{user}:{password}:{endpoint}",
@@ -80,7 +74,7 @@ def _formats(host: str, port: int, user: str, password: str) -> dict:
     }
 
 
-def build_config(proxies: list[dict], port_start: int = 10000,
+def build_config(proxies: list[dict], port_start: int = 21001,
                  limit: int = 300, listen_host: str = "127.0.0.1",
                  public_host: str = "", auth_user: str = "",
                  auth_password: str = "") -> tuple[str, list[dict]]:
@@ -96,7 +90,7 @@ def build_config(proxies: list[dict], port_start: int = 10000,
         port = port_start + index
         listener = {
             "name": f"conv-{port}",
-            "type": "mixed",
+            "type": "http",
             "port": port,
             "listen": listen_host,
             "proxy": node["name"],
@@ -105,13 +99,16 @@ def build_config(proxies: list[dict], port_start: int = 10000,
             listener["users"] = [{"username": auth_user, "password": auth_password}]
         listeners.append(listener)
         endpoint = f"{public_host}:{port}"
-        formats = _formats(public_host, port, auth_user, auth_password)
+        if auth_user and auth_password:
+            url = f"http://{auth_user}:{auth_password}@{endpoint}"
+        else:
+            url = f"http://{endpoint}"
         entries.append({
             "port": port,
             "name": node["name"],
-            "url": formats["http-url"],
+            "url": url,
             "line": endpoint,
-            "formats": formats,
+            "formats": _formats(public_host, port, auth_user, auth_password),
         })
     document = {
         "mixed-port": 0,

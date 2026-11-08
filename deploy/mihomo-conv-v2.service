@@ -1,0 +1,12 @@
+[Unit]
+Description=mihomo for converter v2 listeners (10001+)
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/mihomo -d /opt/clash-converter-v2/data/mihomo -f /opt/clash-converter-v2/data/mihomo/config.yaml
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

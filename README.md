@@ -1,126 +1,75 @@
-# clash2pureIP
+# Clash Converter v2 部署与永久方案
 
-将 Clash 订阅中的每个节点映射为独立代理端口，并生成可批量导入代理池的地址。端口中的代理入口使用 mihomo `mixed` listener，因此同一个端口同时接受 HTTP、SOCKS5 和 SOCKS5H。
+一个把 Clash 订阅转换成「独立 HTTP 代理端口」的小型 WebUI，带代理池管理与连通性测试。
 
 ## 功能
 
-- 固定使用 `10000-10999` 端口范围，每个订阅节点对应一个出口
-- HTTP 和 SOCKS5 共用监听端口，并支持用户名/密码认证
-- 七种导出格式：三种带协议头 URL 和四种传统代理池格式
-- 单个节点复制、全格式复制、服务端测速
-- WebUI 密码登录，运行状态和认证信息持久化
-- 订阅内容只在转换时读取，不写入仓库
+1. **转换订阅** — 填订阅链接与起始端口，为每个节点开一个独立 HTTP 代理端口。
+2. **本次解析** — 列表展示本次结果，可逐条/批量测试（目标 Google `generate_204`），勾选后选择性入池。
+3. **代理池** — 持久化在 `data/pool.json`，支持手动增删、批量测试、复制、清空。
+4. **订阅缓存** — 服务器被订阅站按 IP 信誉拦截时，可由能拉取的机器推送订阅文本作兜底。
 
-## 格式
-
-每个节点都会生成以下七种值：
-
-```text
-http://username:password@hostname:port
-socks5://username:password@hostname:port
-socks5h://username:password@hostname:port
-hostname:port:username:password
-username:password:hostname:port
-username:password@hostname:port
-hostname:port@username:password
-```
-
-`socks5://` 和 `socks5h://` 都指向真实的 SOCKS5 服务；区别是客户端是否把域名解析交给代理解析。
+界面为黄黑（深色）/ 黄白（浅色）双主题，右上角切换，选择记在浏览器本地。
 
 ## 部署
 
-### 1. 安装依赖
-
 ```bash
-sudo mkdir -p /opt/clash-converter-10000
-sudo chown "$USER" /opt/clash-converter-10000
-cd /opt/clash-converter-10000
+sudo mkdir -p /opt/clash-converter-v2 && sudo chown $USER /opt/clash-converter-v2
+# 上传本仓库文件到 /opt/clash-converter-v2
+cd /opt/clash-converter-v2
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env
-```
+cp .env.example .env && vim .env      # 修改 WEBUI_PASS / PROXY_PASS / PUBLIC_HOST
 
-编辑 `.env`，至少设置一个强 WebUI 密码。公网代理还需要设置 `LISTEN_HOST=0.0.0.0`、`PUBLIC_HOST` 和强 `PROXY_PASS`。
-
-### 2. 安装 mihomo
-
-从 [MetaCubeX/mihomo Releases](https://github.com/MetaCubeX/mihomo/releases) 下载 Linux 版本，并安装到 `/usr/local/bin/mihomo`。
-
-创建首次启动用的占位配置：
-
-```bash
-mkdir -p /opt/clash-converter-10000/data/mihomo
-cat > /opt/clash-converter-10000/data/mihomo/config.yaml <<'EOF'
-mixed-port: 0
-allow-lan: false
-mode: rule
-log-level: warning
-proxies: []
-rules:
-  - MATCH,DIRECT
-EOF
-```
-
-### 3. 安装 systemd 服务
-
-```bash
-sudo cp deploy/mihomo-conv.service /etc/systemd/system/mihomo-conv-10000.service
-sudo cp deploy/clash-converter.service /etc/systemd/system/clash-converter.service
+sudo cp deploy/clash-converter-v2.service deploy/mihomo-conv-v2.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now mihomo-conv-10000 clash-converter
+sudo systemctl enable --now mihomo-conv-v2 clash-converter-v2
+sudo ufw allow 8090/tcp
 ```
 
-WebUI 默认监听 `8090/tcp`。公网代理还需在防火墙和云安全组中放行实际使用的端口范围。
+访问 `http://<server>:8090/`，用 `.env` 里的账号密码登录。
 
-## 远程部署脚本
+## 订阅被 Cloudflare 拦截时的永久方案
 
-`deploy/deploy_remote.py` 使用 SSH/SFTP 上传程序并重启服务。先安装 Paramiko：
+部分订阅站在 Cloudflare 后面按**来源 IP 信誉**拦截数据中心 IP：服务器直连 403，走自家节点出口也 403，
+JA3 伪装（chrome124/safari17_0）与 Go 客户端（mihomo proxy-provider）同样 403；只有干净的住宅/教育网 IP + Clash UA 能过。
 
-```powershell
-python -m pip install paramiko
+解决办法：在能正常拉取的机器上跑定时任务：
+
+```
+本机拉取订阅 → POST /api/upload-sub 推到服务器缓存
+            → 服务器 /api/convert 直连失败时自动回退缓存 → 重建监听端口
 ```
 
-再通过环境变量传入凭据，脚本不会在仓库中保存这些值：
+脚本见 `deploy/refresh-sub.ps1`（Windows 计划任务示例，每 6 小时执行一次）。
+需要把脚本顶部的 `$Server` / `$WebUser` / `$WebPass` 改成自己的值。
 
-```powershell
-$env:DEPLOY_HOST = "203.0.113.10"
-$env:DEPLOY_USER = "root"
-$env:SSH_PASS = "ssh-password"
-$env:WEBUI_USER = "admin"
-$env:WEBUI_PASS = "webui-password"
-$env:PROXY_USER = "proxyuser"
-$env:PROXY_PASS = "proxy-password"
-python deploy/deploy_remote.py
-```
+## 服务清单
 
-可选变量：
-
-- `PUBLIC_HOST`：写入导出地址的主机名或 IP，默认等于 `DEPLOY_HOST`
-- `OLD_ROOT`：旧安装目录；设置后，脚本会在目标文件不存在时迁移密钥、状态和 mihomo 配置
-
-## 使用
-
-1. 打开 `http://SERVER:8090/` 并登录。
-2. 填入 Clash 订阅地址。
-3. 需要覆盖服务端配置时展开「高级设置」，可选填起始端口、代理账号和代理密码；留空即沿用 `.env` 中的默认值。
-4. 转换后选择需要的输出格式。
-5. 使用单个复制按钮，或复制当前格式的全部地址。
-6. 用「全部测速」检查端口连通性与延迟；测速协议跟随当前选择的 HTTP、SOCKS5 或 SOCKS5H 格式。
+| 服务 | 端口 | 说明 |
+|---|---|---|
+| clash-converter-v2 | 8090 | WebUI（转换 / 测试 / 代理池 / 缓存） |
+| mihomo-conv-v2 | 10001+ | 订阅节点对应的 HTTP 代理监听 |
+| mihomo-newsub | 21000-21018 | 订阅原始端口（可选，仅回环） |
+| tls-wrap | 8155-8184 | TLS 包装入口（给需要加密到服务器的客户端用） |
 
 ## API
 
 ```http
-POST /api/convert  {"url":"https://example.com/subscription","port_start":10000}
-GET  /api/status
-GET  /api/test?port=10000&scheme=http|socks5|socks5h
-GET  /healthz
+POST /api/convert      {"url":"https://...","port_start":10001}
+POST /api/upload-sub   正文为订阅 YAML（需要登录）
+GET  /api/sub-cache
+GET  /api/pool
+POST /api/pool/add     {"urls":["http://user:pass@host:port"]}
+POST /api/pool/remove  {"urls":[...]} 或 {"all":true}
+POST /api/pool/test    {} 测试池内全部
+POST /api/test         {"urls":[...]} 只测不存
+POST /api/push         {"target":"http://127.0.0.1:8081","user":"...","password":"..."}
 ```
 
-除 `/healthz`、`/login` 和 `/static/*` 外，接口都要求登录。
+## 注意
 
-## 安全注意
-
-- 不要把 `.env`、`data/`、订阅链接、代理密码或 SSH 密码提交到 Git
-- 公网监听必须设置强代理密码，并尽量通过防火墙限制来源
-- 每个节点占用一个端口，订阅节点数量不能超过 `11000 - 起始端口`
-- 重新转换会重启 mihomo，现有代理连接会短暂中断
+- `.env`、`data/`、`*.log` 已被 `.gitignore` 排除，不要提交。
+- 测试结果为 `ok` / `blocked` / `challenge` / `error` 四类：`blocked` 表示目标站按出口 IP 拒绝，
+  与「线路不通」不同。
+- 节点端口数量受 `LimitNOFILE` 与防火墙放行范围限制，百级节点以内无需调整。

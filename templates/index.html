@@ -1,284 +1,595 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>clash2pureIP</title>
+<title>Clash Converter</title>
+<script>
+  // apply saved theme before first paint
+  try {
+    const t = localStorage.getItem("cc-theme") || "dark";
+    document.documentElement.dataset.theme = t;
+  } catch {}
+</script>
 <link rel="stylesheet" href="/static/style.css">
+<style>
+  .theme-toggle .i-sun { display: none; }
+  :root[data-theme="light"] .theme-toggle .i-sun { display: block; }
+  :root[data-theme="light"] .theme-toggle .i-moon { display: none; }
+  .seg { display: flex; align-items: center; gap: 6px; }
+
+  .urlcell button.copy {
+    min-width: 46px;
+  }
+</style>
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><div class="mark">C</div><div><h1>clash2pureIP</h1>
-    <p class="sub">订阅链接 → 本地代理端口 → 导入代理池</p></div></div>
+  <div class="brand"><div class="mark">C</div><div><h1>Clash Converter</h1>
+    <p class="sub">订阅 → 端口 → 测试 → 入池</p></div></div>
   <div class="spacer"></div>
+  <button class="theme-toggle" id="theme-btn" title="切换深色 / 浅色">
+    <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/>
+         <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    <span id="theme-label">深色</span>
+  </button>
   <span class="user">{{ user or "guest" }}</span>
   <a class="logout" href="/logout">退出</a>
 </header>
 
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-view="convert">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 7h16M4 12h10M4 17h6"/><path d="M17 14l3 3-3 3"/></svg>
+    <span>转换</span>
+  </button>
+  <button class="tab" data-view="result">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11"/></svg>
+    <span>本次解析</span>
+    <em class="tab-count" id="tab-result-count" hidden>0</em>
+  </button>
+  <button class="tab" data-view="pool">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>
+      <path d="M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+    <span>代理池</span>
+    <em class="tab-count" id="tab-pool-count" hidden>0</em>
+  </button>
+  <button class="tab" data-view="cache">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+    <span>订阅缓存</span>
+  </button>
+</nav>
+
 <main>
-  <section class="panel">
-    <h2>1. 转换订阅</h2>
+  <!-- 1 转换 -->
+  <section class="panel view active" id="view-convert">
+    <div class="panel-head"><h2>转换订阅</h2></div>
     <div class="row">
       <label class="field-inline grow">订阅链接
-        <input id="url" type="text" placeholder="https://.../api/v1/...?token=...">
+        <input id="url" type="text" placeholder="https://…/api/v1/client/subscribe?token=…">
       </label>
-      <button id="advanced-toggle" class="subtle" type="button"
-              aria-expanded="false" aria-controls="advanced-settings">高级设置</button>
-      <button id="convert" class="primary">转换并生成端口</button>
+      <label class="field-inline">起始端口
+        <input id="port-start" type="number" value="10001" min="1025" max="65000" style="width:110px">
+      </label>
+      <button id="convert" class="primary">转换</button>
     </div>
-    <div id="advanced-settings" class="advanced-settings hidden">
-      <div class="settings-grid">
-        <label class="field-inline">起始端口
-          <input id="port-start" type="number" placeholder="10000" min="10000" max="10999">
-        </label>
-        <label class="field-inline">代理账号
-          <input id="proxy-user" type="text" autocomplete="off" placeholder="沿用服务端账号">
-        </label>
-        <label class="field-inline">代理密码
-          <input id="proxy-pass" type="password" autocomplete="new-password" placeholder="沿用服务端密码">
-        </label>
-      </div>
-      <p class="hint settings-note">留空即使用服务端默认值；自定义账号和密码需要同时填写。</p>
-    </div>
-    <p class="hint" id="convert-hint">代理出口固定使用 10000–10999 端口；起始端口之后必须容纳全部节点。</p>
+    <p class="hint" id="convert-hint" style="margin:10px 0 0">
+      测试目标 Google <span class="mono">generate_204</span>；服务器拉不动订阅时自动使用本机推送的缓存。
+    </p>
   </section>
 
-  <section class="panel hidden" id="result-panel">
-    <h2>2. 转换结果</h2>
-    <div class="row" style="margin-bottom:12px">
-      <span class="hint" id="summary"></span>
-      <div class="spacer" style="flex:1"></div>
-      <label class="field-inline">输出格式
-        <select id="format">
-          <option value="http-url">http://username:password@hostname:port</option>
-          <option value="socks5-url">socks5://username:password@hostname:port</option>
-          <option value="socks5h-url">socks5h://username:password@hostname:port</option>
-          <option value="host:port:user:pass">hostname:port:username:password</option>
-          <option value="user:pass:host:port">username:password:hostname:port</option>
-          <option value="user:pass@host:port">username:password@hostname:port</option>
-          <option value="host:port@user:pass">hostname:port@username:password</option>
-        </select>
-      </label>
-      <button id="test-all">全部测速</button>
-      <button id="copy-format" class="primary">复制当前格式</button>
-      <button id="copy-all">复制全部格式</button>
+  <!-- 2 本次解析 -->
+  <section class="panel view" id="view-result">
+    <div class="panel-head">
+      <h2>本次解析</h2>
+      <span class="badge" id="result-badge">0 个节点</span>
+      <div class="spacer"></div>
+      <select id="format" style="width:auto">
+        <option value="url">http://user:pass@host:port</option>
+        <option value="host:port:user:pass">host:port:user:pass</option>
+        <option value="user:pass:host:port">user:pass:host:port</option>
+        <option value="user:pass@host:port">user:pass@host:port</option>
+        <option value="host:port@user:pass">host:port@user:pass</option>
+      </select>
+      <button id="copy-all" class="sm">复制全部</button>
+      <button id="copy-ok" class="sm">复制可用</button>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>#</th><th>端口</th><th>节点</th><th>输出</th><th>测速</th><th>复制</th></tr></thead>
+
+    <div class="stat" id="result-stat"></div>
+
+    <div class="row" style="margin-bottom:12px">
+      <button id="test-all" class="sm">全部测试</button>
+      <button id="test-sel" class="sm">测试勾选</button>
+      <button id="check-ok" class="sm">仅勾选可用</button>
+      <button id="pool-sel" class="primary sm">勾选入池</button>
+      <button id="pool-ok" class="sm">可用入池</button>
+    </div>
+
+    <div class="scroll">
+      <table class="grid">
+        <thead><tr>
+          <th class="c-check"><input type="checkbox" id="all-check"></th>
+          <th class="c-idx">#</th>
+          <th class="c-port">端口</th>
+          <th class="c-name">节点</th>
+          <th class="c-state">测试</th>
+          <th>地址</th>
+        </tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <p class="hint" id="test-hint">出口同时兼容 HTTP 与 SOCKS5；测速协议跟随当前输出格式。</p>
+    <div class="empty" id="result-empty">还没有解析结果，先在「转换」页执行一次。</div>
+  </section>
+
+  <!-- 3 代理池 -->
+  <section class="panel view" id="view-pool">
+    <div class="panel-head">
+      <h2>代理池</h2>
+      <span class="badge" id="pool-badge">0</span>
+      <div class="spacer"></div>
+      <button id="pool-test" class="sm">全部测试</button>
+      <button id="pool-copy" class="sm">复制全部</button>
+      <button id="pool-copy-ok" class="sm">复制可用</button>
+      <button id="pool-copysel" class="sm">复制勾选</button>
+      <button id="pool-del" class="sm danger">删除勾选</button>
+      <button id="pool-clear" class="sm danger">清空</button>
+    </div>
+
+    <div class="stat" id="pool-stat"></div>
+
+    <div class="row" style="margin-bottom:12px">
+      <label class="field-inline grow">手动添加（一行一个）
+        <input id="manual" type="text" placeholder="http://user:pass@1.2.3.4:8080">
+      </label>
+      <button id="manual-add" class="primary">添加</button>
+    </div>
+
+    <div class="scroll">
+      <table class="grid" style="min-width:700px">
+        <thead><tr>
+          <th class="c-check"><input type="checkbox" id="pool-all-check"></th>
+          <th class="c-state">状态</th>
+          <th>地址</th>
+          <th class="c-act"></th>
+        </tr></thead>
+        <tbody id="pool-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 缓存 -->
+  <section class="panel view" id="view-cache">
+    <div class="panel-head">
+      <h2>订阅缓存</h2>
+      <span class="badge" id="cache-badge">未知</span>
+    </div>
+    <details class="more">
+      <summary>手动上传订阅内容（自动刷新正常时无需操作）</summary>
+      <div class="row" style="margin-top:10px">
+        <label class="field-inline grow">粘贴 YAML
+          <input id="sub-paste" type="text" placeholder="粘贴订阅全文">
+        </label>
+        <input id="sub-file" type="file" style="display:none">
+        <button id="sub-pick" class="sm">选文件</button>
+        <button id="sub-send" class="primary sm">上传</button>
+      </div>
+      <p class="hint" id="cache-info" style="margin:8px 0 0"></p>
+    </details>
   </section>
 </main>
 
 <div id="toast" class="toast hidden"></div>
 
 <script>
-const $ = (s) => document.querySelector(s);
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
 let entries = [];
-let formatList = [];
-let currentFormat = "http-url";
-let proxyUser = "";
-const testResults = new Map();
+let results = {};
+let pool = [];
+let currentFormat = "url";
 
-function valueOf(entry) {
-  if (entry.formats && entry.formats[currentFormat]) return entry.formats[currentFormat];
-  if (entry.formats && entry.formats.url) return entry.formats.url;
-  return entry.url;
+/* ---------------------------------------------------------------- tabs */
+function showView(name) {
+  $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === name));
+  $$(".view").forEach(v => v.classList.toggle("active", v.id === `view-${name}`));
+  try { localStorage.setItem("cc-view", name); } catch {}
+  history.replaceState(null, "", `#${name}`);
+}
+$$(".tab").forEach(t => t.addEventListener("click", () => showView(t.dataset.view)));
+
+/* ------------------------------------------------------------- theme */
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $("#theme-label").textContent = t === "light" ? "浅色" : "深色";
+  try { localStorage.setItem("cc-theme", t); } catch {}
+}
+applyTheme(document.documentElement.dataset.theme || "dark");
+$("#theme-btn").addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+});
+
+/* ------------------------------------------------------------- utils */
+function toast(msg, isError) {
+  const n = $("#toast");
+  n.textContent = msg;
+  n.classList.toggle("error", !!isError);
+  n.classList.remove("hidden");
+  clearTimeout(n._t);
+  n._t = setTimeout(() => n.classList.add("hidden"), 3500);
 }
 
-function testScheme() {
-  if (currentFormat === "socks5h-url") return "socks5h";
-  if (currentFormat === "socks5-url") return "socks5";
-  return "http";
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function toast(message, isError) {
-  const node = $("#toast");
-  node.textContent = message;
-  node.classList.toggle("error", !!isError);
-  node.classList.remove("hidden");
-  clearTimeout(node._t);
-  node._t = setTimeout(() => node.classList.add("hidden"), 3500);
-}
-
-async function api(path, options) {
-  const res = await fetch(path, {headers: {"Content-Type": "application/json"}, ...(options || {})});
-  const data = await res.json().catch(() => ({ok: false, error: `HTTP ${res.status}`}));
+async function api(path, opts) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...(opts || {}),
+  });
+  const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
   if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
-function render(data) {
-  entries = data.entries || [];
-  if (data.formats) formatList = data.formats;
-  if (data.proxy_user) proxyUser = data.proxy_user;
-  if (!entries.length) return;
-  $("#result-panel").classList.remove("hidden");
-  $("#summary").textContent =
-    `${entries.length} 个节点 · 端口 ${data.port_start ?? entries[0].port} 起 · ` +
-    `账号 ${proxyUser || "-"} · ${data.converted_at || ""}` +
-    (data.ready === false ? " · mihomo 未就绪" : " · mihomo 就绪");
-  renderRows();
-}
-
-function testLabel(port) {
-  const value = testResults.get(port);
-  if (!value) return "未测";
-  if (value.status !== "ok") return "失败";
-  return `${value.delay_ms} ms`;
-}
-
-function renderRows() {
-  $("#rows").innerHTML = entries.map((e, i) =>
-    `<tr><td>${i + 1}</td><td class="mono">${e.port}</td>` +
-    `<td>${escapeHtml(e.name)}</td><td class="mono">${escapeHtml(valueOf(e))}</td>` +
-    `<td class="test-result" data-test-port="${e.port}">${testLabel(e.port)}</td>` +
-    `<td><button class="row-copy" data-copy-port="${e.port}">复制</button></td></tr>`).join("");
-}
-
-function testOne(port, scheme) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  const started = performance.now();
-  return fetch(`/api/test?port=${encodeURIComponent(port)}&scheme=${encodeURIComponent(scheme)}`, {
-    headers: {"Accept": "application/json"}, signal: controller.signal,
-  }).then(async (res) => {
-    const data = await res.json().catch(() => ({ok: false, error: `HTTP ${res.status}`}));
-    if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
-    return {status: "ok", delay_ms: data.delay_ms};
-  }).catch((err) => ({
-    status: "fail",
-    delay_ms: Math.round(performance.now() - started),
-    error: err.name === "AbortError" ? "timeout" : err.message,
-  })).finally(() => clearTimeout(timer));
-}
-
-async function runTests(ports, scheme) {
-  const button = $("#test-all");
-  button.disabled = true;
-  const queue = [...ports];
-  let done = 0;
-  const worker = async () => {
-    while (queue.length) {
-      const port = queue.shift();
-      testResults.set(port, {status: "running"});
-      const cell = document.querySelector(`[data-test-port="${port}"]`);
-      if (cell) cell.textContent = "测试中…";
-      const result = await testOne(port, scheme);
-      testResults.set(port, result);
-      if (cell) {
-        cell.textContent = testLabel(port);
-        cell.classList.toggle("test-failed", result.status !== "ok");
-      }
-      done += 1;
-      $("#test-hint").textContent = `${scheme.toUpperCase()} 测速进度 ${done}/${ports.length}`;
-    }
-  };
-  await Promise.all(Array.from({length: Math.min(8, ports.length)}, worker));
-  const ok = [...testResults.values()].filter((r) => r.status === "ok").length;
-  $("#test-hint").textContent = `${scheme.toUpperCase()} 测速完成：成功 ${ok}，失败 ${ports.length - ok}`;
-  button.disabled = false;
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-}
-
-async function copy(text, label) {
-  try { await navigator.clipboard.writeText(text); }
-  catch (e) {
-    const a = document.createElement("textarea"); a.value = text; document.body.appendChild(a);
-    a.select(); document.execCommand("copy"); a.remove();
+async function copyText(text, label) {
+  if (!text) return toast("没有内容可复制", true);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
   }
-  toast(`${label} 已复制（${text.split("\n").length} 行）`);
+  const n = text.split("\n").length;
+  toast(`${label}已复制${n > 1 ? `（${n} 行）` : ""}`);
 }
 
-$("#advanced-toggle").addEventListener("click", () => {
-  const expanded = $("#advanced-toggle").getAttribute("aria-expanded") === "true";
-  $("#advanced-toggle").setAttribute("aria-expanded", String(!expanded));
-  $("#advanced-settings").classList.toggle("hidden", expanded);
+function entryValue(e) {
+  if (currentFormat === "url") return e.url;
+  return (e.formats && e.formats[currentFormat]) || e.url;
+}
+
+function stateCell(r) {
+  if (!r) return '<span class="state-none">未测</span>';
+  if (r.ok) return `<span class="state-ok">可用</span> <span class="hint">${esc(r.latency)}s</span>`;
+  if (r.verdict === "blocked") return `<span class="state-bad">被拒</span> <span class="hint">${esc(r.message || "")}</span>`;
+  if (r.verdict === "challenge") return `<span class="state-warn">需验证</span> <span class="hint">${esc(r.message || "")}</span>`;
+  return `<span class="state-bad">不通</span> <span class="hint">${esc(r.message || r.error || "")}</span>`;
+}
+
+/* ------------------------------------------------------ result section */
+function renderEntries() {
+  const has = entries.length > 0;
+  $("#result-empty").hidden = has;
+  $("#tab-result-count").hidden = !has;
+  $("#tab-result-count").textContent = entries.length;
+  if (!has) return;
+
+  $("#result-badge").textContent = `${entries.length} 个 · ${entries[0].port} 起`;
+  const tested = entries.filter(e => results[e.port]).length;
+  const ok = entries.filter(e => results[e.port]?.ok).length;
+  $("#result-stat").innerHTML = `
+    <span class="chip">总计 <b>${entries.length}</b></span>
+    <span class="chip">已测 <b>${tested}</b></span>
+    <span class="chip ${ok ? "ok" : ""}">可用 <b>${ok}</b></span>
+    <span class="chip ${tested - ok ? "bad" : ""}">不可用 <b>${tested - ok}</b></span>`;
+
+  $("#rows").innerHTML = entries.map((e, i) => `
+    <tr>
+      <td class="c-check"><input type="checkbox" class="row-check" data-port="${e.port}" checked></td>
+      <td class="c-idx hint">${i + 1}</td>
+      <td class="c-port mono">${e.port}</td>
+      <td class="c-name" title="${esc(e.name)}">${esc(e.name)}</td>
+      <td class="c-state">${stateCell(results[e.port])}</td>
+      <td><div class="urlcell">
+        <code title="${esc(entryValue(e))}">${esc(entryValue(e))}</code>
+        <button class="copy" data-copy="${esc(entryValue(e))}">复制</button>
+      </div></td>
+    </tr>`).join("");
+}
+
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("[data-copy]");
+  if (b) copyText(b.dataset.copy, "地址");
 });
 
+$("#format").addEventListener("change", e => {
+  currentFormat = e.target.value;
+  renderEntries();
+});
+
+$("#all-check").addEventListener("change", e => {
+  $$(".row-check").forEach(cb => { cb.checked = e.target.checked; });
+});
+
+function selectedPorts() {
+  return $$(".row-check:checked").map(cb => Number(cb.dataset.port));
+}
+
+async function runTests(ports) {
+  if (!ports.length) return toast("先勾选节点", true);
+  const map = Object.fromEntries(entries.map(e => [e.port, e]));
+  toast(`测试 ${ports.length} 个节点…`);
+  try {
+    const data = await api("/api/test", {
+      method: "POST",
+      body: JSON.stringify({ urls: ports.map(p => map[p].url) }),
+    });
+    const portOf = {};
+    entries.forEach(e => { portOf[e.url] = e.port; });
+    (data.results || []).forEach(r => {
+      const p = portOf[r.url];
+      if (p != null) results[p] = r;
+    });
+    renderEntries();
+    const ok = (data.results || []).filter(r => r.ok).length;
+    toast(`测试完成：${ok} 可用 / ${ports.length} 个`);
+  } catch (err) { toast(err.message, true); }
+}
+
+$("#test-all").addEventListener("click", () => runTests(entries.map(e => e.port)));
+$("#test-sel").addEventListener("click", () => runTests(selectedPorts()));
+
+$("#check-ok").addEventListener("click", () => {
+  let n = 0;
+  $$(".row-check").forEach(cb => {
+    const ok = results[Number(cb.dataset.port)]?.ok === true;
+    cb.checked = ok;
+    if (ok) n++;
+  });
+  toast(n ? `已勾选 ${n} 个可用节点` : "先点「全部测试」", !n);
+});
+
+async function addToPool(list) {
+  if (!list.length) return toast("没有可入池的节点", true);
+  try {
+    const data = await api("/api/pool/add", {
+      method: "POST",
+      body: JSON.stringify({ urls: list.map(e => e.url) }),
+    });
+    toast(`入池：新增 ${data.added}，已存在 ${data.skipped}`);
+    await loadPool();
+  } catch (err) { toast(err.message, true); }
+}
+
+$("#pool-sel").addEventListener("click", () => {
+  const ports = new Set(selectedPorts());
+  addToPool(entries.filter(e => ports.has(e.port)));
+});
+$("#pool-ok").addEventListener("click", () =>
+  addToPool(entries.filter(e => results[e.port]?.ok)));
+
+$("#copy-all").addEventListener("click", () =>
+  copyText(entries.map(entryValue).join("\n"), "全部地址"));
+$("#copy-ok").addEventListener("click", () => {
+  const list = entries.filter(e => results[e.port]?.ok).map(entryValue);
+  if (!list.length) return toast("还没有测试出可用节点", true);
+  copyText(list.join("\n"), "可用地址");
+});
+
+/* -------------------------------------------------------- pool section */
+function renderPool() {
+  $("#pool-badge").textContent = pool.length;
+  $("#tab-pool-count").hidden = !pool.length;
+  $("#tab-pool-count").textContent = pool.length;
+  const ok = pool.filter(x => x.last_status === "ok").length;
+  const bad = pool.filter(x => x.last_status && x.last_status !== "ok").length;
+  $("#pool-stat").innerHTML = `
+    <span class="chip">池内 <b>${pool.length}</b></span>
+    <span class="chip ${ok ? "ok" : ""}">可用 <b>${ok}</b></span>
+    <span class="chip ${bad ? "bad" : ""}">不可用 <b>${bad}</b></span>
+    <span class="chip">未测 <b>${pool.length - ok - bad}</b></span>`;
+
+  if (!pool.length) {
+    $("#pool-rows").innerHTML =
+      '<tr><td colspan="4"><div class="empty">池为空，可从上方勾选入池或手动添加</div></td></tr>';
+    return;
+  }
+
+  $("#pool-rows").innerHTML = pool.map(item => {
+    let s = '<span class="state-none">未测</span>';
+    if (item.last_status === "ok")
+      s = `<span class="state-ok">可用</span> <span class="hint">${esc(item.last_latency || "")}s</span>`;
+    else if (item.last_status === "blocked")
+      s = '<span class="state-bad">被拒</span>';
+    else if (item.last_status === "challenge")
+      s = '<span class="state-warn">需验证</span>';
+    else if (item.last_status)
+      s = '<span class="state-bad">不通</span>';
+
+    return `<tr>
+      <td class="c-check"><input type="checkbox" class="pool-check" value="${esc(item.url)}"></td>
+      <td class="c-state">${s}</td>
+      <td><div class="urlcell">
+        <code title="${esc(item.url)}">${esc(item.url)}</code>
+        <button class="copy" data-copy="${esc(item.url)}">复制</button>
+      </div></td>
+      <td class="c-act"><button class="sm danger" data-del="${esc(item.url)}">删除</button></td>
+    </tr>`;
+  }).join("");
+
+  $$("[data-del]").forEach(b => b.addEventListener("click", () => removeUrls([b.dataset.del])));
+}
+
+async function loadPool() {
+  try {
+    const d = await api("/api/pool");
+    pool = d.pool || [];
+    renderPool();
+  } catch (err) { toast(err.message, true); }
+}
+
+function selectedPoolUrls() {
+  return $$(".pool-check:checked").map(cb => cb.value);
+}
+
+$("#pool-all-check").addEventListener("change", e => {
+  $$(".pool-check").forEach(cb => { cb.checked = e.target.checked; });
+});
+
+async function removeUrls(urls) {
+  if (!urls.length) return toast("先勾选", true);
+  try {
+    const d = await api("/api/pool/remove", {
+      method: "POST",
+      body: JSON.stringify({ urls }),
+    });
+    toast(`已删除 ${d.removed} 条`);
+    await loadPool();
+  } catch (err) { toast(err.message, true); }
+}
+
+$("#pool-del").addEventListener("click", () => removeUrls(selectedPoolUrls()));
+
+$("#pool-clear").addEventListener("click", async () => {
+  if (!confirm("确定清空整个池？")) return;
+  try {
+    await api("/api/pool/remove", { method: "POST", body: JSON.stringify({ all: true }) });
+    toast("池已清空");
+    await loadPool();
+  } catch (err) { toast(err.message, true); }
+});
+
+$("#pool-test").addEventListener("click", async () => {
+  if (!pool.length) return toast("池为空", true);
+  toast(`测试 ${pool.length} 条…`);
+  try {
+    const d = await api("/api/pool/test", { method: "POST", body: "{}" });
+    const ok = (d.results || []).filter(r => r.ok).length;
+    toast(`完成：${ok} 可用 / ${pool.length}`);
+    await loadPool();
+  } catch (err) { toast(err.message, true); }
+});
+
+$("#pool-copy").addEventListener("click", () =>
+  copyText(pool.map(x => x.url).join("\n"), "池内全部地址"));
+$("#pool-copy-ok").addEventListener("click", () => {
+  const list = pool.filter(x => x.last_status === "ok").map(x => x.url);
+  if (!list.length) return toast("池内还没有可用地址，先测试", true);
+  copyText(list.join("\n"), "池内可用地址");
+});
+$("#pool-copysel").addEventListener("click", () => {
+  const list = selectedPoolUrls();
+  if (!list.length) return toast("先勾选", true);
+  copyText(list.join("\n"), "勾选地址");
+});
+
+$("#manual-add").addEventListener("click", async () => {
+  const text = $("#manual").value.trim();
+  if (!text) return toast("先填地址", true);
+  try {
+    const d = await api("/api/pool/add", { method: "POST", body: JSON.stringify({ urls: text }) });
+    $("#manual").value = "";
+    toast(`新增 ${d.added}，已存在 ${d.skipped}`);
+    await loadPool();
+  } catch (err) { toast(err.message, true); }
+});
+
+/* ------------------------------------------------------------- convert */
 $("#convert").addEventListener("click", async () => {
   const url = $("#url").value.trim();
   if (!url) return toast("先填订阅链接", true);
-  const payload = {url};
-  const advancedEnabled = $("#advanced-toggle").getAttribute("aria-expanded") === "true";
-  if (advancedEnabled) {
-    const portStart = $("#port-start").value.trim();
-    const proxyUser = $("#proxy-user").value.trim();
-    const proxyPass = $("#proxy-pass").value;
-    if (portStart) {
-      const parsedPort = Number(portStart);
-      if (!Number.isInteger(parsedPort)) return toast("起始端口必须是整数", true);
-      payload.port_start = parsedPort;
-    }
-    if (!!proxyUser !== !!proxyPass) {
-      return toast("代理账号和密码需要同时填写", true);
-    }
-    if (proxyUser && proxyPass) {
-      payload.proxy_user = proxyUser;
-      payload.proxy_password = proxyPass;
-    }
-  }
-
-  const button = $("#convert");
-  button.disabled = true;
+  const btn = $("#convert");
+  btn.disabled = true;
   $("#convert-hint").textContent = "转换中…";
   try {
-    const data = await api("/api/convert", {
+    const d = await api("/api/convert", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ url, port_start: Number($("#port-start").value) }),
     });
-    render(data);
-    $("#convert-hint").textContent = `完成：${data.nodes} 个节点，端口 ${data.port_start} 起`;
-    toast(`转换完成：${data.nodes} 个节点`);
+    entries = d.entries || [];
+    results = {};
+    renderEntries();
+    $("#convert-hint").textContent =
+      `完成：${d.nodes} 个节点，端口 ${d.port_start} 起` +
+      (d.source_used === "cache" ? "（使用本机推送的缓存）" : "") +
+      (d.ready === false ? "，mihomo 未就绪" : "");
+    toast(`转换完成：${d.nodes} 个节点`);
   } catch (err) {
     $("#convert-hint").textContent = "";
     toast(err.message, true);
-  } finally {
-    button.disabled = false;
-  }
+  } finally { btn.disabled = false; }
 });
 
-$("#format").addEventListener("change", (event) => {
-  currentFormat = event.target.value;
-  testResults.clear();
-  if (entries.length) renderRows();
-});
-
-$("#test-all").addEventListener("click", () => {
-  if (!entries.length) return toast("先转换", true);
-  testResults.clear();
-  renderRows();
-  runTests(entries.map((entry) => entry.port), testScheme());
-});
-
-$("#rows").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-copy-port]");
-  if (!button) return;
-  const entry = entries.find((item) => item.port === Number(button.dataset.copyPort));
-  if (entry) copy(valueOf(entry), `端口 ${entry.port}`);
-});
-
-$("#copy-format").addEventListener("click", () =>
-  copy(entries.map((e) => valueOf(e)).join("\n"), currentFormat));
-
-$("#copy-all").addEventListener("click", () => {
-  const blocks = formatList.length
-    ? formatList.map((f) => `# ${f.label}\n` + entries.map((e) => e.formats[f.key]).join("\n"))
-    : [entries.map((e) => valueOf(e)).join("\n")];
-  copy(blocks.join("\n\n"), "全部格式");
-});
-
-(async function bootstrap() {
+/* --------------------------------------------------------------- cache */
+async function loadCache() {
   try {
-    const data = await api("/api/status");
-    if (data.entries && data.entries.length) render(data);
-  } catch (e) { /* ignore */ }
+    const d = await api("/api/sub-cache");
+    $("#cache-badge").textContent = d.exists ? `${d.age_hours}h 前` : "无缓存";
+    $("#cache-info").textContent = d.exists ? `上次推送：${d.cached_at}` : "还没有推送过订阅";
+  } catch {}
+}
+
+async function uploadSub(text) {
+  if (!text.trim()) return toast("内容为空", true);
+  try {
+    let res = await fetch("/api/upload-sub", {
+      method: "POST", headers: { "Content-Type": "text/yaml" }, body: text,
+    });
+    if (res.status === 401) {
+      const u = prompt("账号") || "";
+      const p = prompt("密码") || "";
+      res = await fetch("/api/upload-sub", {
+        method: "POST",
+        headers: { "Content-Type": "text/yaml", Authorization: "Basic " + btoa(`${u}:${p}`) },
+        body: text,
+      });
+    }
+    const d = await res.json();
+    if (!res.ok || d.ok === false) throw new Error(d.error || `HTTP ${res.status}`);
+    toast(`已上传 ${d.bytes} 字符`);
+    loadCache();
+  } catch (err) { toast(err.message, true); }
+}
+
+$("#sub-send").addEventListener("click", () => uploadSub($("#sub-paste").value));
+$("#sub-pick").addEventListener("click", () => $("#sub-file").click());
+$("#sub-file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => uploadSub(String(r.result || ""));
+  r.readAsText(f);
+  e.target.value = "";
+});
+
+/* ---------------------------------------------------------------- boot */
+(async function () {
+  const hash = location.hash.replace("#", "");
+  const saved = hash || localStorage.getItem("cc-view") || "convert";
+  showView(["convert", "result", "pool", "cache"].includes(saved) ? saved : "convert");
+
+  try {
+    const d = await api("/api/status");
+    if (d.entries?.length) {
+      entries = d.entries;
+      renderEntries();
+      $("#convert-hint").textContent =
+        `已载入上次转换：${entries.length} 个节点（${d.converted_at || ""}）`;
+    } else {
+      renderEntries();
+    }
+  } catch {}
+  await loadPool();
+  await loadCache();
 })();
 </script>
 </body>

@@ -1,0 +1,16 @@
+[Unit]
+Description=Clash converter v2 WebUI with proxy pool
+After=network.target mihomo-conv.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/clash-converter-v2
+EnvironmentFile=/opt/clash-converter-v2/.env
+ExecStart=/opt/clash-converter-v2/.venv/bin/gunicorn -w 1 --threads 8 -b 0.0.0.0:8091 app:app
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
